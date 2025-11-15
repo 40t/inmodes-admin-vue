@@ -13,12 +13,14 @@
         </el-form-item>
 
         <el-form-item label="分类">
-          <el-select v-model="searchForm.category" placeholder="全部" clearable style="width: 120px">
+          <el-select v-model="searchForm.category" placeholder="全部" clearable style="width: 150px">
             <el-option label="全部" value="" />
-            <el-option label="自然音" value="nature" />
-            <el-option label="音乐" value="music" />
-            <el-option label="白噪音" value="white_noise" />
-            <el-option label="环境音" value="ambient" />
+            <el-option
+              v-for="cat in categories"
+              :key="cat.id"
+              :label="cat.name"
+              :value="cat.slug"
+            />
           </el-select>
         </el-form-item>
 
@@ -59,10 +61,10 @@
           <template #default="{ row }">
             <el-image
               v-if="row.type === 'image'"
-              :src="row.thumbnail || row.url"
+              :src="getFileUrl(row.thumbnail || row.file_path)"
               fit="cover"
               style="width: 60px; height: 60px; border-radius: 4px"
-              :preview-src-list="[row.url]"
+              :preview-src-list="[getFileUrl(row.file_path)]"
             />
             <el-icon v-else-if="row.type === 'audio'" :size="40" color="#409eff">
               <Headset />
@@ -176,13 +178,18 @@
           </el-select>
         </el-form-item>
 
-        <el-form-item label="分类" prop="category">
-          <el-select v-model="uploadForm.category" placeholder="请选择分类" style="width: 100%">
-            <el-option label="自然音" value="nature" />
-            <el-option label="音乐" value="music" />
-            <el-option label="白噪音" value="white_noise" />
-            <el-option label="环境音" value="ambient" />
+        <el-form-item label="分类/目录" prop="category">
+          <el-select v-model="uploadForm.category" placeholder="请选择上传目录" style="width: 100%">
+            <el-option
+              v-for="cat in categories"
+              :key="cat.id"
+              :label="`${cat.name} (${cat.slug})`"
+              :value="cat.slug"
+            />
           </el-select>
+          <div style="margin-top: 8px; font-size: 12px; color: #909399;">
+            文件将上传到 R2 的对应目录,例如: {{ uploadForm.category }}/filename.mp3
+          </div>
         </el-form-item>
 
         <el-form-item label="描述" prop="description">
@@ -221,10 +228,12 @@
 
         <el-form-item label="分类" prop="category">
           <el-select v-model="editForm.category" placeholder="请选择分类" style="width: 100%">
-            <el-option label="自然音" value="nature" />
-            <el-option label="音乐" value="music" />
-            <el-option label="白噪音" value="white_noise" />
-            <el-option label="环境音" value="ambient" />
+            <el-option
+              v-for="cat in categories"
+              :key="cat.id"
+              :label="cat.name"
+              :value="cat.slug"
+            />
           </el-select>
         </el-form-item>
 
@@ -253,7 +262,11 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadInstance } from 'element-plus'
 import { Plus, UploadFilled, Headset, VideoPlay } from '@element-plus/icons-vue'
 import * as assetsApi from '../../api/assets'
-import type { MediaAsset } from '../../types'
+import * as categoriesApi from '../../api/categories'
+import type { MediaAsset, Category } from '../../types'
+
+// 分类数据
+const categories = ref<Category[]>([])
 
 // 搜索表单
 const searchForm = reactive({
@@ -467,7 +480,20 @@ async function handleUpdate() {
  * 预览
  */
 function handlePreview(row: MediaAsset) {
-  window.open(row.url, '_blank')
+  window.open(getFileUrl(row.file_path), '_blank')
+}
+
+/**
+ * 获取文件完整 URL
+ * 文件存储在 R2,使用 CDN 地址
+ */
+function getFileUrl(path: string) {
+  // 如果已经是完整 URL，直接返回
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+  // R2 文件使用 CDN 地址: https://static.inmodes.com/audio/rain.mp3
+  return `https://static.inmodes.com/${path}`
 }
 
 /**
@@ -531,9 +557,28 @@ function formatDate(date: string) {
   return new Date(date).toLocaleString('zh-CN')
 }
 
+/**
+ * 加载分类列表
+ */
+async function fetchCategories() {
+  try {
+    const res = await categoriesApi.getAllCategories({ is_active: true })
+    console.log('分类 API 响应:', res)
+    if (res.success && res.data) {
+      categories.value = res.data
+      console.log('分类数据已加载:', categories.value)
+    } else {
+      console.warn('分类数据加载失败，success:', res.success)
+    }
+  } catch (error) {
+    console.error('加载分类失败:', error)
+  }
+}
+
 // 初始化
 onMounted(() => {
   fetchData()
+  fetchCategories()
 })
 </script>
 

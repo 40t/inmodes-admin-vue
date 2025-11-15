@@ -20,6 +20,18 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/assets/index.vue'),
         meta: { title: '物料资产管理' },
       },
+      {
+        path: 'categories',
+        name: 'Categories',
+        component: () => import('../views/categories/index.vue'),
+        meta: { title: '分类管理' },
+      },
+      {
+        path: 'r2',
+        name: 'R2',
+        component: () => import('../views/r2/index.vue'),
+        meta: { title: 'R2 存储管理' },
+      },
     ],
   },
 ]

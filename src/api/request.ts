@@ -1,5 +1,13 @@
-import axios, { type AxiosInstance, type AxiosError } from 'axios'
+import axios, { type AxiosInstance, type AxiosError, type InternalAxiosRequestConfig } from 'axios'
 import { ElMessage } from 'element-plus'
+
+// 自定义 Axios 实例类型，响应拦截器返回 response.data
+interface CustomAxiosInstance extends AxiosInstance {
+  get<T = any>(url: string, config?: any): Promise<T>
+  post<T = any>(url: string, data?: any, config?: any): Promise<T>
+  put<T = any>(url: string, data?: any, config?: any): Promise<T>
+  delete<T = any>(url: string, config?: any): Promise<T>
+}
 
 /**
  * 计算基础接口地址
@@ -28,13 +36,13 @@ function resolveBaseURL() {
 /**
  * 创建 Axios 实例
  */
-const request: AxiosInstance = axios.create({
+const request = axios.create({
   baseURL: resolveBaseURL(),
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
-})
+}) as CustomAxiosInstance
 
 /**
  * 请求拦截器

@@ -16,6 +16,14 @@
           <el-icon><Files /></el-icon>
           <span>物料资产</span>
         </el-menu-item>
+        <el-menu-item index="/categories">
+          <el-icon><Folder /></el-icon>
+          <span>分类管理</span>
+        </el-menu-item>
+        <el-menu-item index="/r2">
+          <el-icon><Upload /></el-icon>
+          <span>R2 存储</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -55,7 +63,7 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Files, User } from '@element-plus/icons-vue'
+import { Files, User, Upload, Folder } from '@element-plus/icons-vue'
 import { useUserStore } from '../../stores/user'
 
 const route = useRoute()
