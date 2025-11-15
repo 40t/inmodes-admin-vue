@@ -35,7 +35,10 @@ export function getAsset(id: number): Promise<ApiResponse<MediaAsset>> {
 /**
  * 上传物料资产
  */
-export function uploadAsset(data: UploadParams): Promise<ApiResponse<MediaAsset>> {
+export function uploadAsset(
+  data: UploadParams,
+  onProgress?: (progressEvent: any) => void
+): Promise<ApiResponse<MediaAsset>> {
   const formData = new FormData()
   formData.append('file', data.file)
   formData.append('title', data.title)
@@ -47,6 +50,28 @@ export function uploadAsset(data: UploadParams): Promise<ApiResponse<MediaAsset>
     headers: {
       'Content-Type': 'multipart/form-data',
     },
+    timeout: 300000, // 5分钟超时
+    onUploadProgress: onProgress,
+  })
+}
+
+/**
+ * 重新上传物料文件
+ */
+export function reuploadAsset(
+  id: number,
+  file: File,
+  onProgress?: (progressEvent: any) => void
+): Promise<ApiResponse<MediaAsset>> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  return request.post(`/media/${id}/reupload`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+    timeout: 300000, // 5分钟超时
+    onUploadProgress: onProgress,
   })
 }
 

@@ -16,7 +16,7 @@
           <el-select v-model="searchForm.category" placeholder="全部" clearable style="width: 150px">
             <el-option label="全部" value="" />
             <el-option
-              v-for="cat in categories"
+              v-for="cat in searchFilteredCategories"
               :key="cat.id"
               :label="cat.name"
               :value="cat.slug"
@@ -103,10 +103,13 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="handleEdit(row)">
               编辑
+            </el-button>
+            <el-button link type="success" size="small" @click="handleReupload(row)">
+              重新上传
             </el-button>
             <el-button link type="primary" size="small" @click="handlePreview(row)">
               预览
@@ -176,19 +179,27 @@
             <el-option label="视频" value="video" />
             <el-option label="图片" value="image" />
           </el-select>
+          <div style="margin-top: 8px; font-size: 12px; color: #909399;">
+            决定 R2 存储目录: {{ uploadForm.type || 'audio/video/image' }}/
+          </div>
         </el-form-item>
 
-        <el-form-item label="分类/目录" prop="category">
-          <el-select v-model="uploadForm.category" placeholder="请选择上传目录" style="width: 100%">
+        <el-form-item label="分类" prop="category">
+          <el-select 
+            v-model="uploadForm.category" 
+            placeholder="请先选择类型" 
+            :disabled="!uploadForm.type"
+            style="width: 100%"
+          >
             <el-option
-              v-for="cat in categories"
+              v-for="cat in filteredCategories"
               :key="cat.id"
               :label="`${cat.name} (${cat.slug})`"
               :value="cat.slug"
             />
           </el-select>
           <div style="margin-top: 8px; font-size: 12px; color: #909399;">
-            文件将上传到 R2 的对应目录,例如: {{ uploadForm.category }}/filename.mp3
+            用于业务筛选和内容管理
           </div>
         </el-form-item>
 
@@ -200,12 +211,23 @@
             placeholder="请输入描述"
           />
         </el-form-item>
+
+        <!-- 上传进度 -->
+        <el-form-item v-if="uploading">
+          <el-progress 
+            :percentage="uploadProgress" 
+            :status="uploadProgress === 100 ? 'success' : undefined"
+          />
+          <div style="margin-top: 8px; font-size: 12px; color: #909399; text-align: center;">
+            {{ uploadProgress < 100 ? '正在上传...' : '处理中...' }}
+          </div>
+        </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button @click="uploadDialogVisible = false" :disabled="uploading">取消</el-button>
         <el-button type="primary" :loading="uploading" @click="handleUpload">
-          确定上传
+          {{ uploading ? '上传中...' : '确定上传' }}
         </el-button>
       </template>
     </el-dialog>
@@ -254,11 +276,76 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 重新上传对话框 -->
+    <el-dialog
+      v-model="reuploadDialogVisible"
+      title="重新上传文件"
+      width="600px"
+    >
+      <el-alert
+        title="提示"
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 20px"
+      >
+        重新上传将替换原有文件，但保留标题、分类等信息
+      </el-alert>
+
+      <el-form
+        ref="reuploadFormRef"
+        :model="reuploadForm"
+        label-width="80px"
+      >
+        <el-form-item label="当前信息">
+          <div style="color: #606266">
+            <div>标题: {{ reuploadForm.title }}</div>
+            <div>类型: {{ getTypeName(reuploadForm.type) }}</div>
+            <div>分类: {{ getCategoryName(reuploadForm.category) }}</div>
+          </div>
+        </el-form-item>
+
+        <el-form-item label="新文件" prop="file" required>
+          <el-upload
+            ref="reuploadRef"
+            :auto-upload="false"
+            :limit="1"
+            :on-change="handleReuploadFileChange"
+            drag
+          >
+            <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+            <div class="el-upload__text">
+              拖拽文件到此处或<em>点击上传</em>
+            </div>
+            <template #tip>
+              <div class="el-upload__tip">
+                只能上传 {{ getTypeName(reuploadForm.type) }} 文件，且不超过 500MB
+              </div>
+            </template>
+          </el-upload>
+        </el-form-item>
+
+        <!-- 上传进度 -->
+        <el-form-item v-if="uploading">
+          <el-progress :percentage="uploadProgress" :status="uploadProgress === 100 ? 'success' : undefined" />
+          <div style="margin-top: 10px; color: #909399; font-size: 14px">
+            正在上传... {{ uploadProgress }}%
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="reuploadDialogVisible = false" :disabled="uploading">取消</el-button>
+        <el-button type="primary" :loading="uploading" @click="handleReuploadSubmit">
+          {{ uploading ? '上传中...' : '确定上传' }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadInstance } from 'element-plus'
 import { Plus, UploadFilled, Headset, VideoPlay } from '@element-plus/icons-vue'
 import * as assetsApi from '../../api/assets'
@@ -267,6 +354,18 @@ import type { MediaAsset, Category } from '../../types'
 
 // 分类数据
 const categories = ref<Category[]>([])
+
+// 根据上传表单的类型过滤分类
+const filteredCategories = computed(() => {
+  if (!uploadForm.type) return []
+  return categories.value.filter(cat => cat.type === uploadForm.type)
+})
+
+// 根据搜索表单的类型过滤分类
+const searchFilteredCategories = computed(() => {
+  if (!searchForm.type) return categories.value
+  return categories.value.filter(cat => cat.type === searchForm.type)
+})
 
 // 搜索表单
 const searchForm = reactive({
@@ -291,6 +390,7 @@ const uploadDialogVisible = ref(false)
 const uploadFormRef = ref<FormInstance>()
 const uploadRef = ref<UploadInstance>()
 const uploading = ref(false)
+const uploadProgress = ref(0)
 const uploadForm = reactive({
   file: null as File | null,
   title: '',
@@ -419,19 +519,32 @@ async function handleUpload() {
     if (!valid || !uploadForm.file) return
 
     uploading.value = true
+    uploadProgress.value = 0
+    
     try {
-      await assetsApi.uploadAsset({
-        file: uploadForm.file,
-        title: uploadForm.title,
-        type: uploadForm.type,
-        category: uploadForm.category,
-        description: uploadForm.description,
-      })
+      await assetsApi.uploadAsset(
+        {
+          file: uploadForm.file,
+          title: uploadForm.title,
+          type: uploadForm.type,
+          category: uploadForm.category,
+          description: uploadForm.description,
+        },
+        (progressEvent) => {
+          // 计算上传进度
+          if (progressEvent.total) {
+            uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          }
+        }
+      )
       ElMessage.success('上传成功')
       uploadDialogVisible.value = false
+      uploadProgress.value = 0
       fetchData()
-    } catch (error) {
+    } catch (error: any) {
       console.error('上传失败:', error)
+      ElMessage.error(error.response?.data?.detail || '上传失败，请重试')
+      uploadProgress.value = 0
     } finally {
       uploading.value = false
     }
@@ -447,6 +560,70 @@ function handleEdit(row: MediaAsset) {
   editForm.category = row.category
   editForm.description = row.description || ''
   editDialogVisible.value = true
+}
+
+/**
+ * 重新上传
+ */
+const reuploadDialogVisible = ref(false)
+const reuploadFormRef = ref<FormInstance>()
+const reuploadForm = reactive({
+  id: 0,
+  file: null as File | null,
+  title: '',
+  type: '' as 'audio' | 'video' | 'image',
+  category: '',
+})
+
+function handleReupload(row: MediaAsset) {
+  reuploadForm.id = row.id
+  reuploadForm.title = row.title
+  reuploadForm.type = row.type
+  reuploadForm.category = row.category
+  reuploadForm.file = null
+  reuploadDialogVisible.value = true
+}
+
+/**
+ * 重新上传文件选择
+ */
+function handleReuploadFileChange(file: any) {
+  reuploadForm.file = file.raw
+}
+
+/**
+ * 执行重新上传
+ */
+async function handleReuploadSubmit() {
+  if (!reuploadForm.file) {
+    ElMessage.warning('请选择要上传的文件')
+    return
+  }
+
+  uploading.value = true
+  uploadProgress.value = 0
+  
+  try {
+    await assetsApi.reuploadAsset(
+      reuploadForm.id,
+      reuploadForm.file,
+      (progressEvent: any) => {
+        if (progressEvent.total) {
+          uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        }
+      }
+    )
+    ElMessage.success('重新上传成功')
+    reuploadDialogVisible.value = false
+    uploadProgress.value = 0
+    fetchData()
+  } catch (error: any) {
+    console.error('重新上传失败:', error)
+    ElMessage.error(error.response?.data?.detail || '重新上传失败，请重试')
+    uploadProgress.value = 0
+  } finally {
+    uploading.value = false
+  }
 }
 
 /**
@@ -574,6 +751,24 @@ async function fetchCategories() {
     console.error('加载分类失败:', error)
   }
 }
+
+// 监听上传表单类型变化，清空分类选择
+watch(() => uploadForm.type, (newType, oldType) => {
+  if (newType !== oldType) {
+    uploadForm.category = ''
+  }
+})
+
+// 监听搜索表单类型变化，清空分类选择
+watch(() => searchForm.type, (newType, oldType) => {
+  if (newType !== oldType && searchForm.category) {
+    // 检查当前选择的分类是否属于新类型
+    const currentCategory = categories.value.find(cat => cat.slug === searchForm.category)
+    if (currentCategory && currentCategory.type !== newType) {
+      searchForm.category = ''
+    }
+  }
+})
 
 // 初始化
 onMounted(() => {
