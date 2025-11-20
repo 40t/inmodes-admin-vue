@@ -45,6 +45,8 @@ export function uploadAsset(
   if (data.description) formData.append('description', data.description)
   formData.append('type', data.type)
   formData.append('category', data.category)
+  // 如果有封面图片，添加到FormData
+  if (data.thumbnail) formData.append('thumbnail', data.thumbnail)
 
   return request.post('/media/upload', formData, {
     headers: {

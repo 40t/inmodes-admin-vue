@@ -60,7 +60,7 @@
         <el-table-column label="预览" width="100">
           <template #default="{ row }">
             <el-image
-              v-if="row.type === 'image'"
+              v-if="row.type === 'image' || (row.type === 'video' && row.thumbnail)"
               :src="getFileUrl(row.thumbnail || row.file_path)"
               fit="cover"
               style="width: 60px; height: 60px; border-radius: 4px"
@@ -212,6 +212,39 @@
           />
         </el-form-item>
 
+        <!-- 视频预览和封面截取 -->
+        <el-form-item v-if="uploadForm.type === 'video' && uploadForm.videoPreviewUrl" label="视频预览">
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <video
+              ref="videoPreviewRef"
+              :src="uploadForm.videoPreviewUrl"
+              controls
+              style="width: 100%; max-height: 300px; border-radius: 4px; background: #000;"
+              @loadedmetadata="handleVideoLoaded"
+            />
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <el-button type="primary" size="small" @click="captureVideoFrame">
+                <el-icon><Camera /></el-icon>
+                截取当前帧作为封面
+              </el-button>
+              <span v-if="uploadForm.thumbnail" style="color: #67c23a; font-size: 14px;">
+                <el-icon><Check /></el-icon>
+                已截取封面
+              </span>
+            </div>
+            <!-- 封面预览 -->
+            <div v-if="thumbnailPreviewUrl" style="margin-top: 8px;">
+              <div style="font-size: 14px; color: #606266; margin-bottom: 8px;">封面预览：</div>
+              <el-image
+                :src="thumbnailPreviewUrl"
+                fit="cover"
+                style="width: 200px; height: 112px; border-radius: 4px;"
+              />
+            </div>
+          </div>
+          <canvas ref="canvasRef" style="display: none;"></canvas>
+        </el-form-item>
+
         <!-- 上传进度 -->
         <el-form-item v-if="uploading">
           <el-progress 
@@ -347,7 +380,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadInstance } from 'element-plus'
-import { Plus, UploadFilled, Headset, VideoPlay } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Headset, VideoPlay, Camera, Check } from '@element-plus/icons-vue'
 import * as assetsApi from '../../api/assets'
 import * as categoriesApi from '../../api/categories'
 import type { MediaAsset, Category } from '../../types'
@@ -391,12 +424,17 @@ const uploadFormRef = ref<FormInstance>()
 const uploadRef = ref<UploadInstance>()
 const uploading = ref(false)
 const uploadProgress = ref(0)
+const videoPreviewRef = ref<HTMLVideoElement>()
+const canvasRef = ref<HTMLCanvasElement>()
+const thumbnailPreviewUrl = ref<string | null>(null)
 const uploadForm = reactive({
   file: null as File | null,
   title: '',
   type: 'audio' as 'audio' | 'video' | 'image',
   category: '',
   description: '',
+  thumbnail: null as File | null,
+  videoPreviewUrl: null as string | null,
 })
 
 const uploadRules: FormRules = {
@@ -487,6 +525,32 @@ function showUploadDialog() {
  */
 function handleFileChange(file: any) {
   uploadForm.file = file.raw
+  
+  // 检测文件类型（通过MIME type）
+  const isVideo = file.raw && file.raw.type.startsWith('video/')
+  
+  // 如果是视频文件，创建预览URL
+  if (isVideo && file.raw) {
+    // 清理旧的预览URL
+    if (uploadForm.videoPreviewUrl) {
+      URL.revokeObjectURL(uploadForm.videoPreviewUrl)
+    }
+    uploadForm.videoPreviewUrl = URL.createObjectURL(file.raw)
+    // 清空之前的封面
+    uploadForm.thumbnail = null
+    thumbnailPreviewUrl.value = null
+    
+    // 如果类型还没选择，自动设置为video
+    if (!uploadForm.type || uploadForm.type !== 'video') {
+      uploadForm.type = 'video'
+    }
+  } else {
+    // 非视频文件，清理视频预览
+    if (uploadForm.videoPreviewUrl) {
+      URL.revokeObjectURL(uploadForm.videoPreviewUrl)
+      uploadForm.videoPreviewUrl = null
+    }
+  }
 }
 
 /**
@@ -494,6 +558,71 @@ function handleFileChange(file: any) {
  */
 function handleFileRemove() {
   uploadForm.file = null
+  // 清理视频预览URL
+  if (uploadForm.videoPreviewUrl) {
+    URL.revokeObjectURL(uploadForm.videoPreviewUrl)
+    uploadForm.videoPreviewUrl = null
+  }
+  // 清理封面预览URL
+  if (thumbnailPreviewUrl.value) {
+    URL.revokeObjectURL(thumbnailPreviewUrl.value)
+    thumbnailPreviewUrl.value = null
+  }
+  uploadForm.thumbnail = null
+}
+
+/**
+ * 视频加载完成
+ */
+function handleVideoLoaded() {
+  console.log('视频加载完成，可以截取封面')
+}
+
+/**
+ * 截取视频当前帧作为封面
+ */
+function captureVideoFrame() {
+  const video = videoPreviewRef.value
+  const canvas = canvasRef.value
+  
+  if (!video || !canvas) {
+    ElMessage.error('视频预览未就绪')
+    return
+  }
+  
+  // 设置canvas尺寸为视频尺寸
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  
+  // 绘制当前视频帧到canvas
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    ElMessage.error('无法创建canvas上下文')
+    return
+  }
+  
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  
+  // 将canvas转换为Blob，然后创建File对象
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      ElMessage.error('截取封面失败')
+      return
+    }
+    
+    // 创建File对象
+    const timestamp = Date.now()
+    const thumbnailFile = new File([blob], `thumbnail_${timestamp}.jpg`, { type: 'image/jpeg' })
+    uploadForm.thumbnail = thumbnailFile
+    
+    // 创建预览URL
+    if (thumbnailPreviewUrl.value) {
+      URL.revokeObjectURL(thumbnailPreviewUrl.value)
+    }
+    thumbnailPreviewUrl.value = URL.createObjectURL(blob)
+    
+    ElMessage.success('封面截取成功')
+  }, 'image/jpeg', 0.9)
 }
 
 /**
@@ -505,6 +634,20 @@ function resetUploadForm() {
   uploadForm.type = 'audio'
   uploadForm.category = ''
   uploadForm.description = ''
+  uploadForm.thumbnail = null
+  
+  // 清理视频预览URL
+  if (uploadForm.videoPreviewUrl) {
+    URL.revokeObjectURL(uploadForm.videoPreviewUrl)
+    uploadForm.videoPreviewUrl = null
+  }
+  
+  // 清理封面预览URL
+  if (thumbnailPreviewUrl.value) {
+    URL.revokeObjectURL(thumbnailPreviewUrl.value)
+    thumbnailPreviewUrl.value = null
+  }
+  
   uploadFormRef.value?.resetFields()
   uploadRef.value?.clearFiles()
 }
@@ -529,6 +672,7 @@ async function handleUpload() {
           type: uploadForm.type,
           category: uploadForm.category,
           description: uploadForm.description,
+          thumbnail: uploadForm.thumbnail,
         },
         (progressEvent) => {
           // 计算上传进度

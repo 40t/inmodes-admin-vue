@@ -67,6 +67,7 @@ export interface UploadParams {
   description?: string
   type: 'audio' | 'video' | 'image'
   category: string
+  thumbnail?: File | null
 }
 
 /**
