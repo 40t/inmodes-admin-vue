@@ -59,16 +59,27 @@
         
         <el-table-column label="预览" width="100">
           <template #default="{ row }">
+            <!-- 图片类型：使用 el-image 预览 -->
             <el-image
-              v-if="row.type === 'image' || (row.type === 'video' && row.thumbnail)"
-              :src="getFileUrl(row.thumbnail || row.file_path)"
+              v-if="row.type === 'image'"
+              :src="getFileUrl(row.file_path)"
               fit="cover"
               style="width: 60px; height: 60px; border-radius: 4px"
               :preview-src-list="[getFileUrl(row.file_path)]"
             />
+            <!-- 视频类型：显示封面缩略图，但不使用 el-image 预览 -->
+            <img
+              v-else-if="row.type === 'video' && row.thumbnail"
+              :src="getFileUrl(row.thumbnail)"
+              style="width: 60px; height: 60px; border-radius: 4px; object-fit: cover; cursor: pointer;"
+              @click="handlePreview(row)"
+              :title="'点击预览视频: ' + row.title"
+            />
+            <!-- 音频图标 -->
             <el-icon v-else-if="row.type === 'audio'" :size="40" color="#409eff">
               <Headset />
             </el-icon>
+            <!-- 视频图标（无封面） -->
             <el-icon v-else :size="40" color="#67c23a">
               <VideoPlay />
             </el-icon>
@@ -315,6 +326,7 @@
       v-model="reuploadDialogVisible"
       title="重新上传文件"
       width="600px"
+      @close="resetReuploadForm"
     >
       <el-alert
         title="提示"
@@ -344,6 +356,7 @@
             :auto-upload="false"
             :limit="1"
             :on-change="handleReuploadFileChange"
+            :on-remove="handleReuploadFileRemove"
             drag
           >
             <el-icon class="el-icon--upload"><upload-filled /></el-icon>
@@ -356,6 +369,38 @@
               </div>
             </template>
           </el-upload>
+        </el-form-item>
+
+        <!-- 视频预览和封面截取 -->
+        <el-form-item v-if="reuploadForm.type === 'video' && reuploadForm.videoPreviewUrl" label="视频预览">
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <video
+              ref="reuploadVideoPreviewRef"
+              :src="reuploadForm.videoPreviewUrl"
+              controls
+              style="width: 100%; max-height: 300px; border-radius: 4px; background: #000;"
+            />
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <el-button type="primary" size="small" @click="captureReuploadVideoFrame">
+                <el-icon><Camera /></el-icon>
+                截取当前帧作为封面
+              </el-button>
+              <span v-if="reuploadForm.thumbnail" style="color: #67c23a; font-size: 14px;">
+                <el-icon><Check /></el-icon>
+                已截取封面
+              </span>
+            </div>
+            <!-- 封面预览 -->
+            <div v-if="reuploadThumbnailPreviewUrl" style="margin-top: 8px;">
+              <div style="font-size: 14px; color: #606266; margin-bottom: 8px;">封面预览：</div>
+              <el-image
+                :src="reuploadThumbnailPreviewUrl"
+                fit="cover"
+                style="width: 200px; height: 112px; border-radius: 4px;"
+              />
+            </div>
+          </div>
+          <canvas ref="reuploadCanvasRef" style="display: none;"></canvas>
         </el-form-item>
 
         <!-- 上传进度 -->
@@ -711,12 +756,17 @@ function handleEdit(row: MediaAsset) {
  */
 const reuploadDialogVisible = ref(false)
 const reuploadFormRef = ref<FormInstance>()
+const reuploadVideoPreviewRef = ref<HTMLVideoElement>()
+const reuploadCanvasRef = ref<HTMLCanvasElement>()
+const reuploadThumbnailPreviewUrl = ref<string | null>(null)
 const reuploadForm = reactive({
   id: 0,
   file: null as File | null,
   title: '',
   type: '' as 'audio' | 'video' | 'image',
   category: '',
+  thumbnail: null as File | null,
+  videoPreviewUrl: null as string | null,
 })
 
 function handleReupload(row: MediaAsset) {
@@ -725,7 +775,30 @@ function handleReupload(row: MediaAsset) {
   reuploadForm.type = row.type
   reuploadForm.category = row.category
   reuploadForm.file = null
+  reuploadForm.thumbnail = null
+  reuploadForm.videoPreviewUrl = null
+  reuploadThumbnailPreviewUrl.value = null
   reuploadDialogVisible.value = true
+}
+
+/**
+ * 重置重新上传表单
+ */
+function resetReuploadForm() {
+  reuploadForm.file = null
+  reuploadForm.thumbnail = null
+  
+  // 清理视频预览URL
+  if (reuploadForm.videoPreviewUrl) {
+    URL.revokeObjectURL(reuploadForm.videoPreviewUrl)
+    reuploadForm.videoPreviewUrl = null
+  }
+  
+  // 清理封面预览URL
+  if (reuploadThumbnailPreviewUrl.value) {
+    URL.revokeObjectURL(reuploadThumbnailPreviewUrl.value)
+    reuploadThumbnailPreviewUrl.value = null
+  }
 }
 
 /**
@@ -733,6 +806,86 @@ function handleReupload(row: MediaAsset) {
  */
 function handleReuploadFileChange(file: any) {
   reuploadForm.file = file.raw
+  
+  // 检测文件类型（通过MIME type）
+  const isVideo = file.raw && file.raw.type.startsWith('video/')
+  
+  // 如果是视频文件，创建预览URL
+  if (isVideo && file.raw && reuploadForm.type === 'video') {
+    // 清理旧的预览URL
+    if (reuploadForm.videoPreviewUrl) {
+      URL.revokeObjectURL(reuploadForm.videoPreviewUrl)
+    }
+    reuploadForm.videoPreviewUrl = URL.createObjectURL(file.raw)
+    // 清空之前的封面
+    reuploadForm.thumbnail = null
+    reuploadThumbnailPreviewUrl.value = null
+  }
+}
+
+/**
+ * 重新上传文件移除
+ */
+function handleReuploadFileRemove() {
+  reuploadForm.file = null
+  // 清理视频预览URL
+  if (reuploadForm.videoPreviewUrl) {
+    URL.revokeObjectURL(reuploadForm.videoPreviewUrl)
+    reuploadForm.videoPreviewUrl = null
+  }
+  // 清理封面预览URL
+  if (reuploadThumbnailPreviewUrl.value) {
+    URL.revokeObjectURL(reuploadThumbnailPreviewUrl.value)
+    reuploadThumbnailPreviewUrl.value = null
+  }
+  reuploadForm.thumbnail = null
+}
+
+/**
+ * 截取重新上传视频的当前帧作为封面
+ */
+function captureReuploadVideoFrame() {
+  const video = reuploadVideoPreviewRef.value
+  const canvas = reuploadCanvasRef.value
+  
+  if (!video || !canvas) {
+    ElMessage.error('视频预览未就绪')
+    return
+  }
+  
+  // 设置canvas尺寸为视频尺寸
+  canvas.width = video.videoWidth
+  canvas.height = video.videoHeight
+  
+  // 绘制当前视频帧到canvas
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    ElMessage.error('无法创建canvas上下文')
+    return
+  }
+  
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  
+  // 将canvas转换为Blob，然后创建File对象
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      ElMessage.error('截取封面失败')
+      return
+    }
+    
+    // 创建File对象
+    const timestamp = Date.now()
+    const thumbnailFile = new File([blob], `thumbnail_${timestamp}.jpg`, { type: 'image/jpeg' })
+    reuploadForm.thumbnail = thumbnailFile
+    
+    // 创建预览URL
+    if (reuploadThumbnailPreviewUrl.value) {
+      URL.revokeObjectURL(reuploadThumbnailPreviewUrl.value)
+    }
+    reuploadThumbnailPreviewUrl.value = URL.createObjectURL(blob)
+    
+    ElMessage.success('封面截取成功')
+  }, 'image/jpeg', 0.9)
 }
 
 /**
@@ -751,6 +904,7 @@ async function handleReuploadSubmit() {
     await assetsApi.reuploadAsset(
       reuploadForm.id,
       reuploadForm.file,
+      reuploadForm.thumbnail,
       (progressEvent: any) => {
         if (progressEvent.total) {
           uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)

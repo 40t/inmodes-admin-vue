@@ -63,10 +63,13 @@ export function uploadAsset(
 export function reuploadAsset(
   id: number,
   file: File,
+  thumbnail?: File | null,
   onProgress?: (progressEvent: any) => void
 ): Promise<ApiResponse<MediaAsset>> {
   const formData = new FormData()
   formData.append('file', file)
+  // 如果有封面图片，添加到FormData
+  if (thumbnail) formData.append('thumbnail', thumbnail)
 
   return request.post(`/media/${id}/reupload`, formData, {
     headers: {
